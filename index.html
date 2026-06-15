@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NS AnglerDash - 钓鱼佬专属仪表盘 (双语+地图选点版)</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <style>
+        :root {
+            --bg-color: #1a1e24;
+            --card-bg: #242b35;
+            --accent-blue: #3a86ff;
+            --accent-green: #06d6a0;
+            --accent-orange: #ff9f1c;
+            --text-main: #f8f9fa;
+            --text-muted: #98a6ad;
+            --border-color: #2e3742;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        html {
+            background-color: var(--bg-color);
+        }
+
+        body {
+            background-color: transparent;
+            color: var(--text-main);
+            padding: 15px;
+            max-width: 1200px;
+            margin: 0 auto;
+            line-height: 1.5;
+            position: relative;
+        }
+
+        /* --- 极光画布（固定在顶部、藏在所有内容背后） --- */
+        #aurora-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 48vh;
+            z-index: -1;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 2.5s ease;
+            filter: blur(14px) saturate(1.15);  /* 柔化成弥散的极光光幕 */
+        }
+        body.aurora-on #aurora-canvas { opacity: 1; }
+
+        /* 极光模式下，给顶部标题文字加深色阴影，避免被亮色光幕吞掉 */
+        body.aurora-on header h1,
+        body.aurora-on header p {
+            text-shadow: 0 1px 4px rgba(0,0,0,0.95), 0 0 16px rgba(0,0,0,0.75);
+        }
+
+        /* 极光预警角标（仅极光模式显示） */
+        #aurora-badge {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            background: rgba(6, 214, 160, 0.12);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+        body.aurora-on #aurora-badge {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* --- 核心双语切换逻辑 --- */
+        body.zh .en { display: none !important; }
+        body.en .zh { display: none !important; }
+
+        /* 语言切换按钮 */
+        #lang-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            z-index: 1000; /* 确保不被地图盖住 */
+        }
+        #lang-btn:hover {
+            border-color: var(--accent-blue);
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+            margin-top: 20px;
+        }
+
+        header h1 {
+            font-size: 24px;
+            color: var(--text-main);
+            letter-spacing: 0.5px;
+        }
+
+        header p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        /* 仪表盘网格布局 */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .weather-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            position: relative;
+        }
+
+        .weather-card .label {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .weather-card .value {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--text-main);
+        }
+
+        .weather-card .unit {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: 2px;
+        }
+
+        .trend-icon {
+            font-size: 14px;
+            margin-left: 4px;
+        }
+        .trend-up { color: var(--accent-green); }
+        .trend-down { color: #ff0055; }
+
+        .trend-note {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* 转换器和资源网格 */
+        .content-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .section-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .section-card h2 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-left: 8px;
+            border-left: 4px solid var(--accent-blue);
+            color: var(--text-main);
+        }
+
+        /* 转换器样式 */
+        .converter-group {
+            margin-bottom: 15px;
+        }
+
+        .converter-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .input-row {
+            display: flex;
+            align-items: center;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-top: 5px;
+        }
+
+        .input-row input {
+            background: none;
+            border: none;
+            color: var(--text-main);
+            font-size: 16px;
+            width: 100%;
+            outline: none;
+        }
+
+        .input-row span {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: bold;
+            min-width: 45px;
+            text-align: right;
+        }
+
+        .swap-arrow {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            margin: 4px 0;
+        }
+
+        .quick-presets {
+            margin-top: 8px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover {
+            border-color: var(--accent-blue);
+            color: var(--text-main);
+        }
+
+        /* 绑线指南 & 灯箱缩略图样式 */
+        .knot-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .knot-item {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .knot-item h3 {
+            font-size: 13px;
+            margin-bottom: 8px;
+            color: var(--accent-orange);
+        }
+
+        /* 缩略图容器 */
+        .knot-img-wrapper {
+            position: relative;
+            height: 120px;
+            background-color: #2e3742;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            cursor: zoom-in;
+            overflow: hidden;
+            border: 1px dashed #4f5d73;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .thumb-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.2s;
+        }
+
+        .knot-img-wrapper:hover .thumb-img {
+            transform: scale(1.05);
+        }
+
+        /* 纯动态提示语（没图片时顶上） */
+        .placeholder-text {
+            position: absolute;
+            font-size: 11px;
+            color: var(--text-muted);
+            z-index: 1;
+            pointer-events: none;
+            text-align: center;
+            padding: 10px;
+        }
+
+        /* 遮罩层大图核心 - 默认隐藏 */
+        .lightbox-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        /* 当被点击添加 active 类时唤醒弹窗 */
+        .knot-img-wrapper.active .lightbox-overlay {
+            opacity: 1;
+            pointer-events: auto;
+            cursor: zoom-out;
+        }
+
+        .full-img {
+            max-width: 90%;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: 6px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .close-hint {
+            color: #98a6ad;
+            font-size: 12px;
+            margin-top: 15px;
+            background: rgba(255,255,255,0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+
+        .knot-item p {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+        }
+
+        /* 法规与链接样式 */
+        .link-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .action-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            border-radius: 6px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        }
+
+        .action-link:hover {
+            background-color: #2a323d;
+            border-color: var(--accent-blue);
+        }
+
+        .action-link span.icon {
+            font-size: 16px;
+        }
+
+        .alert-banner {
+            background-color: rgba(255, 159, 28, 0.1);
+            border: 1px solid var(--accent-orange);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 12px;
+            font-size: 11px;
+            color: var(--accent-orange);
+        }
+
+        .alert-banner strong {
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        /* 地图容器专属样式 */
+        #map-container {
+            width: 100%;
+            height: 300px;
+            border-radius: 8px;
+            border: 2px solid var(--accent-blue);
+            margin-top: 10px;
+            z-index: 1; /* 防止挡住下拉菜单等组件 */
+        }
+
+        @media (max-width: 600px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .knot-list {
+                grid-template-columns: 1fr;
+            }
+        }
+
+/* --- 飘浮河豚彩蛋样式 --- */
+        .floating-fish {
+            position: fixed;
+            left: -150px; /* 初始位置在屏幕外 */
+            width: 120px; /* 差不多就是大缩略图的尺寸 */
+            height: 120px;
+            cursor: pointer;
+            z-index: 9998; /* 保证在最顶层但不挡住大图灯箱 */
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        /* 鱼本体的上下浮动动画 */
+        .floating-fish img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 10px 15px rgba(0,0,0,0.4));
+            animation: bobbing 3s ease-in-out infinite alternate;
+            transition: transform 0.2s;
+        }
+
+        .floating-fish:hover img {
+            transform: scale(1.1); /* 鼠标放上去微微放大 */
+        }
+
+        /* 头上的文字气泡（默认隐藏） */
+        .fish-bubble {
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            background: #f8f9fa;
+            color: #1a1e24;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: bold;
+            opacity: 0;
+            pointer-events: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            transition: opacity 0.1s;
+        }
+
+        /* 被点击后的逃跑狂暴模式 */
+        .floating-fish.scared .fish-bubble {
+            opacity: 1; /* 显示“呃啊~” */
+        }
+        
+        .floating-fish.scared img {
+            animation: none; /* 停止上下浮动 */
+        }
+
+        /* 上下浮动的关键帧 */
+        @keyframes bobbing {
+            0% { transform: translateY(0px); }
+            100% { transform: translateY(-20px); }
+        }
+
+        /* --- 潮汐速查区样式 --- */
+        .tide-section {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-left: 4px solid var(--accent-blue);
+            border-radius: 10px;
+            padding: 16px 18px;
+            margin-bottom: 20px;
+        }
+
+        .tide-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .tide-header h2 {
+            font-size: 16px;
+            color: var(--text-main);
+        }
+
+        .tide-station-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .tide-station-meta strong { color: var(--accent-green); }
+
+        /* 潮汐事件横向滚动条 */
+        .tide-events {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .tide-chip {
+            flex: 0 0 auto;
+            min-width: 96px;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            text-align: center;
+        }
+        .tide-chip.is-next {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 0 1px var(--accent-orange) inset;
+        }
+
+        .tide-chip .tide-type {
+            font-size: 12px;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .tide-chip .tide-type.high { color: var(--accent-blue); }
+        .tide-chip .tide-type.low  { color: var(--accent-orange); }
+
+        .tide-chip .tide-time {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--text-main);
+        }
+
+        .tide-chip .tide-height {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        .tide-chip .tide-day {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+            letter-spacing: 0.3px;
+        }
+
+        .tide-fallback {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+        .tide-fallback a { color: var(--accent-blue); text-decoration: none; }
+        .tide-fallback a:hover { text-decoration: underline; }
+
+        .tide-loading { font-size: 13px; color: var(--text-muted); }
+
+        .tide-note {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            opacity: 0.8;
+        }
+
+        /* 倒计时（下一次潮汐还有多久） */
+        .tide-countdown {
+            font-size: 10px;
+            color: var(--accent-orange);
+            font-weight: bold;
+            margin-top: 3px;
+            min-height: 12px;
+        }
+
+        /* 潮汐曲线 */
+        .tide-curve-wrap {
+            margin-top: 14px;
+            width: 100%;
+        }
+        .tide-curve-wrap svg { width: 100%; height: auto; display: block; }
+        .tide-curve-wrap:empty { display: none; }
+
+    </style>
+</head>
+<body class="zh"> <canvas id="aurora-canvas"></canvas>
+    <div id="aurora-badge">
+        <span class="zh">🌌 极光预警 Kp <span id="aurora-kp">--</span></span>
+        <span class="en">🌌 Aurora Alert Kp <span id="aurora-kp-en">--</span></span>
+    </div>
+    <button id="lang-btn" onclick="toggleLanguage()">🇨🇦 EN / 中文</button>
+
+    <header>
+        <h1>🎣 NS AnglerDash</h1>
+        <p class="zh">实时出钓气象仪表盘 & 转换工具</p>
+        <p class="en">Real-time Weather Dashboard & Converters</p>
+    </header>
+
+    <div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <select id="spot-select" onchange="changeSpot()" style="padding: 6px 10px; background: var(--card-bg); color: var(--text-main); border: 1px solid var(--accent-blue); border-radius: 6px; outline: none; cursor: pointer;">
+                <option value="44.78,-63.61" class="zh">📍 默认：Powder Mill Park 附近</option>
+                <option value="44.78,-63.61" class="en">📍 Default: Powder Mill Park</option>
+                
+                <option value="45.72,-62.66" class="zh">📍 钓点：Pictou</option>
+                <option value="45.72,-62.66" class="en">📍 Spot: Pictou</option>
+
+                <option value="46.22,-60.04" class="zh">📍 钓点：Lingan bay</option>
+                <option value="46.22,-60.04" class="en">📍 Spot: Lingan bay</option>
+
+                <option value="43.86,-66.11" class="zh">📍 钓点：Yarmouth</option>
+                <option value="43.86,-66.11" class="en">📍 Spot: Yarmouth</option>
+
+                <option value="44.67,-65.75" class="zh">📍 钓点：Digby Harbour</option>
+                <option value="44.67,-65.75" class="en">📍 Spot: Digby Harbour</option>
+            
+                <option value="custom" class="zh">⚙️ 手动输入经纬度...</option>
+                <option value="custom" class="en">⚙️ Custom Coordinates...</option>
+
+                <option value="map" class="zh">🗺️ 开启地图自由点选...</option>
+                <option value="map" class="en">🗺️ Open Map to Pick Spot...</option>
+            </select>
+            
+            <div id="custom-coords" style="display: none; gap: 8px; align-items: center;">
+                <input type="number" id="input-lat" placeholder="纬度/Lat" step="any" style="padding: 6px; width: 85px; background: var(--bg-color); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <input type="number" id="input-lon" placeholder="经度/Lon" step="any" style="padding: 6px; width: 85px; background: var(--bg-color); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px;">
+                <button class="preset-btn" onclick="fetchCustomSpot()" style="border-color: var(--accent-orange); color: var(--accent-orange); margin-top: 0;">
+                    <span class="zh">更新天气</span><span class="en">Update</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="map-wrapper" style="display: none; width: 100%; max-width: 600px;">
+            <div id="map-container"></div>
+            <p style="font-size: 11px; color: var(--accent-orange); margin-top: 5px; text-align: center;">
+                <span class="zh">👆 在地图上点击你想看的位置，自动刷新天气</span>
+                <span class="en">👆 Tap anywhere on the map to refresh weather</span>
+            </p>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="weather-card">
+            <span class="label zh">本地气温</span>
+            <span class="label en">Local Temp</span>
+            <div class="value" id="weather-temp">--<span class="unit">°C</span></div>
+        </div>
+        <div class="weather-card">
+            <span class="label zh">气压及趋势</span>
+            <span class="label en">Pressure Trend</span>
+            <div class="value" id="weather-press">--<span class="unit">kPa</span><span class="trend-icon" id="press-trend"></span></div>
+            <span class="trend-note" id="press-trend-note"></span>
+        </div>
+        <div class="weather-card">
+            <span class="label zh">风向风速</span>
+            <span class="label en">Wind (Dir/Spd)</span>
+            <div class="value" id="weather-wind" style="font-size: 16px; padding: 3px 0;">--</div>
+        </div>
+        <div class="weather-card">
+            <span class="label zh">日出 / 日落</span>
+            <span class="label en">Sunrise/Sunset</span>
+            <div class="value" id="weather-sun" style="font-size: 14px; padding: 5px 0;">--</div>
+        </div>
+        <div class="weather-card">
+            <span class="label zh">当前水温</span>
+            <span class="label en">Water Temp</span>
+            <div class="value" id="weather-water" style="font-size: 22px;">--</div>
+            <span class="trend-note" id="water-note"></span>
+        </div>
+    </div>
+
+    <div class="tide-section">
+        <div class="tide-header">
+            <h2 class="zh">🌊 潮汐速查</h2>
+            <h2 class="en">🌊 Tide Lookup</h2>
+            <div class="tide-station-meta" id="tide-station">
+                <span class="zh">定位最近潮汐站中…</span>
+                <span class="en">Locating nearest station…</span>
+            </div>
+        </div>
+        <div class="tide-events" id="tide-events">
+            <span class="tide-loading zh">⏳ 正在拉取高低潮预报…</span>
+            <span class="tide-loading en">⏳ Loading high/low tide forecast…</span>
+        </div>
+        <div class="tide-curve-wrap" id="tide-curve"></div>
+        <div class="tide-note">
+            <span class="zh">数据：加拿大水文局 (CHS / DFO) 官方潮汐预报，高度以海图基准面 (Chart Datum) 为参考。</span>
+            <span class="en">Source: Canadian Hydrographic Service (CHS / DFO) official predictions. Heights relative to Chart Datum.</span>
+        </div>
+    </div>
+
+    <div class="content-grid">
+        
+        <div class="section-card">
+            <h2 class="zh">通用单位转换</h2>
+            <h2 class="en">Universal Converters</h2>
+            
+            <div class="converter-group">
+                <div class="input-row">
+                    <input type="number" id="input-oz" placeholder="输入盎司 / Ounces" step="any" oninput="convertOzToG(this.value)">
+                    <span>OZ</span>
+                </div>
+                <div class="swap-arrow">▼ <span class="zh">自动转换</span><span class="en">Auto Convert</span></div>
+                <div class="input-row">
+                    <input type="number" id="input-g" placeholder="输入克数 / Grams" step="any" oninput="convertGToOz(this.value)">
+                    <span>G</span>
+                </div>
+                <div class="quick-presets">
+                    <button class="preset-btn" onclick="setOz(0.125)">1/8 oz</button>
+                    <button class="preset-btn" onclick="setOz(0.25)">1/4 oz</button>
+                    <button class="preset-btn" onclick="setOz(0.375)">3/8 oz</button>
+                    <button class="preset-btn" onclick="setOz(0.5)">1/2 oz</button>
+                    <button class="preset-btn" onclick="setOz(0.75)">3/4 oz</button>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+            <div class="converter-group">
+                <div class="input-row">
+                    <input type="number" id="input-kpa" placeholder="千帕 / kPa" step="any" oninput="convertKpaToInhg(this.value)">
+                    <span>kPa</span>
+                </div>
+                <div class="swap-arrow">▼ <span class="zh">自动转换</span><span class="en">Auto Convert</span></div>
+                <div class="input-row">
+                    <input type="number" id="input-inhg" placeholder="英寸汞柱 / inHg" step="any" oninput="convertInhgToKpa(this.value)">
+                    <span>inHG</span>
+                </div>
+                <div class="quick-presets">
+                    <button class="preset-btn" onclick="setKpa(101.3)"><span class="zh">标准压</span><span class="en">Std</span> (101.3)</button>
+                    <button class="preset-btn" onclick="setKpa(102.5)"><span class="zh">高气压</span><span class="en">High</span> (102.5)</button>
+                    <button class="preset-btn" onclick="setKpa(100.0)"><span class="zh">低气压</span><span class="en">Low</span> (100.0)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2 class="zh">线结绑法指南 (点击看大图)</h2>
+            <h2 class="en">Fishing Knots Guide (Tap to Enlarge)</h2>
+            <div class="knot-list">
+                
+                <div class="knot-item">
+                    <h3>Alberto Knot</h3>
+                    <div class="knot-img-wrapper" onclick="toggleLightbox(this)">
+                        <div class="placeholder-text zh">🔍 替换本地图片后<br>此处显示缩略图</div>
+                        <div class="placeholder-text en">🔍 Replace image src<br>to show thumbnail</div>
+                        <img src="images/albknot1.jpg" alt="albertoknot" class="thumb-img" onerror="this.style.opacity='0'">
+                        <div class="lightbox-overlay">
+                            <img src="images/albknot1.jpg" alt="alb 大图" class="full-img">
+                            <div class="close-hint"><span class="zh">点击任意位置关闭大图</span><span class="en">Tap anywhere to close</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="knot-item">
+                    <h3>AG Knot</h3>
+                    <div class="knot-img-wrapper" onclick="toggleLightbox(this)">
+                        <div class="placeholder-text zh">🔍 替换本地图片后<br>此处显示缩略图</div>
+                        <div class="placeholder-text en">🔍 Replace image src<br>to show thumbnail</div>
+                        <img src="images/agknot1.jpg" alt="ag" class="thumb-img" onerror="this.style.opacity='0'">
+                        <div class="lightbox-overlay">
+                            <img src="images/agknot1.jpg" alt="ag大图" class="full-img">
+                            <div class="close-hint"><span class="zh">点击任意位置关闭大图</span><span class="en">Tap anywhere to close</span></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="knot-item">
+                    <h3>Hook Knot</h3>
+                    <div class="knot-img-wrapper" onclick="toggleLightbox(this)">
+                        <div class="placeholder-text zh">🔍 替换本地图片后<br>此处显示缩略图</div>
+                        <div class="placeholder-text en">🔍 Replace image src<br>to show thumbnail</div>
+                        <img src="images/hooknot.png" alt="hook" class="thumb-img" onerror="this.style.opacity='0'">
+                        <div class="lightbox-overlay">
+                            <img src="images/hooknot.png" alt="hook大图" class="full-img">
+                            <div class="close-hint"><span class="zh">点击任意位置关闭大图</span><span class="en">Tap anywhere to close</span></div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2 class="zh">法规、手册与入口</h2>
+            <h2 class="en">Regulations, Handbooks & Links</h2>
+            <div class="link-list">
+               
+
+                <a href="https://www.novascotia.ca/sites/default/files/documents/1-2412/anglers-handbook-en.pdf" target="_blank" class="action-link">
+                    <span>📄 2026 Anglers' Handbook (PDF)</span>
+                    <span class="icon">↗</span>
+                </a>
+
+<a href="fishing-signpost.html" target="_blank" class="action-link">
+                   <span class="zh">😵‍💫手册看晕了，点这里速查</span>
+                    <span class="en">😵‍💫 Handbook's making me dizzy, quick checkup</span>
+                    <span class="icon">↗</span>
+                </a>
+
+                <a href="https://sportfishing.novascotia.ca/" target="_blank" class="action-link">
+                    <span class="zh">💳 线上购买 / 更新钓鱼执照</span>
+                    <span class="en">💳 Buy/Renew Sportfishing Licence</span>
+                    <span class="icon">↗</span>
+                </a>
+                <a href="https://data.novascotia.ca/Lands-Forests-and-Wildlife/Crown-Land-Map/sqec-gjbw" target="_blank" class="action-link">
+                    <span class="zh">🥷🏻 Crown Land 地图</span>
+                    <span class="en">🥷🏻 Crown Land Map</span>
+                    <span class="icon">↗</span>
+                </a>
+                <a href="https://www.fishnovascotia.ca/places" target="_blank" class="action-link">
+                    <span class="zh">✨ 钓场列表（未必全，持续更新中）</span>
+                    <span class="en">✨ Fishing Spots (Community List)</span>
+                    <span class="icon">↗</span>
+                </a>
+                <a href="https://novascotia.ca/fish/sportfishing/hatchery-stocking/stocking-update/#stock-three" target="_blank" class="action-link">
+                    <span class="zh">🐡 政府在哪放鱼了？Weekly stocking update</span>
+                    <span class="en">🐡 NS Weekly Stocking Update</span>
+                    <span class="icon">↗</span>
+                </a>
+            </div>
+            
+            <div class="alert-banner">
+                <strong class="zh">⚠️ 2026 新规重点提醒：</strong>
+                <strong class="en">⚠️ 2026 Regulation Alerts:</strong>
+                
+                <span class="zh">• 全省范围内捕获 Chain Pickerel（链草鱼）<strong>必须强制留存</strong>，禁止放生。<br></span>
+                <span class="en">• Mandatory retention for Chain Pickerel province-wide. No catch & release.<br></span>
+                
+                <span class="zh">• 102号公路以东特定 SMA 水域 Smallmouth Bass（小口黑鲈）亦属于<strong>强制留存</strong>。</span>
+                <span class="en">• Mandatory retention for Smallmouth Bass in specific SMAs east of Hwy 102.</span>
+            </div>
+        </div>
+
+    </div>
+<footer style="margin-top: 30px; padding: 20px 10px; border-top: 1px solid var(--border-color); text-align: center; color: var(--text-muted); font-size: 11px; line-height: 1.6;">
+        <div class="zh">
+            <strong>⚠️ 免责声明：</strong> 本页面仅为个人出钓辅助工具，不保证气象、日出日落及法规数据的绝对准确性或实时性。由于政策随时可能变动，实际限捕条例请务必以 Nova Scotia 渔业部当年发布的官方手册为准。<br>
+            <strong>🤝 鸣谢与开源支持：</strong> 气象数据由 <a href="https://open-meteo.com/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">Open-Meteo API</a> 免费提供 | 地图引擎基于 <a href="https://leafletjs.com/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">Leaflet</a> 与 <a href="https://www.openstreetmap.org/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">OpenStreetMap</a>
+        </div>
+        <div class="en">
+            <strong>⚠️ Disclaimer:</strong> This dashboard is a personal reference tool. We do not guarantee the absolute accuracy of weather, sun times, or regulation data. Always consult the official Nova Scotia Anglers' Handbook for the most up-to-date regulations before fishing.<br>
+            <strong>🤝 Credits & Open Source:</strong> Weather data provided freely by <a href="https://open-meteo.com/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">Open-Meteo API</a> | Map powered by <a href="https://leafletjs.com/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">Leaflet</a> & <a href="https://www.openstreetmap.org/" target="_blank" style="color: var(--accent-blue); text-decoration: none;">OpenStreetMap</a>
+        </div>
+        <div style="margin-top: 15px; font-weight: bold; opacity: 0.6; letter-spacing: 1px;">
+            🎣 TIGHT LINES & SAFE FISHING
+        </div>
+    </footer>
+
+    <script>
+        // --- 地图全局变量 ---
+        let myMap = null;
+        let mapMarker = null;
+
+        // ===================== 极光彩蛋模块 (NOAA SWPC Kp 指数) =====================
+        const KP_FORECAST_URL = 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
+        const AURORA_KP_THRESHOLD = 5;   // Kp ≥ 5 即地磁暴，约 45°N 起有机会看到极光
+        let auroraActive = false;        // 全局状态：河豚台词、背景都读它
+        let auroraRAF = null;            // requestAnimationFrame 句柄
+
+        // 拉取 Kp 预报，判断未来一段时间内是否达到极光阈值
+        async function fetchAuroraStatus() {
+            // 手动测试开关：地址栏带 #aurora 直接强制开启（方便没赶上地磁暴时预览）
+            if (location.hash.toLowerCase().includes('aurora')) {
+                setAurora(true, 7);
+                return;
+            }
+            try {
+                const res = await fetch(KP_FORECAST_URL);
+                if (!res.ok) throw new Error(`kp ${res.status}`);
+                const data = await res.json();           // 对象数组：[{time_tag, kp, observed, noaa_scale}, ...]
+                const now = Date.now();
+                let peak = 0;
+                for (const item of data) {
+                    // 兼容两种结构：对象 {time_tag, kp} 或数组 [time_tag, kp, ...]
+                    const rawTime = item.time_tag ?? item[0];
+                    const rawKp   = item.kp ?? item[1];
+                    if (rawTime == null) continue;        // 跳过表头/异常行
+                    // time_tag 是 UTC（不带时区后缀），补个 Z 再解析；数组结构里用空格分隔则换成 T
+                    const t = new Date(String(rawTime).replace(' ', 'T') + 'Z').getTime();
+                    const kp = parseFloat(rawKp);
+                    if (isNaN(t) || isNaN(kp)) continue;
+                    // 关注"现在前 3h 到现在后 6h"这个窗口（覆盖正在发生 + 即将发生）
+                    if (t >= now - 3*3600*1000 && t <= now + 6*3600*1000) {
+                        if (kp > peak) peak = kp;
+                    }
+                }
+                setAurora(peak >= AURORA_KP_THRESHOLD, peak);
+            } catch (err) {
+                console.log('极光数据暂不可用（不影响其他功能）:', err.message);
+                // 拉取失败就保持当前状态，不打扰
+            }
+        }
+
+        // 设置极光状态：切背景、角标、启停动画
+        function setAurora(on, kp) {
+            auroraActive = on;
+            const body = document.body;
+            if (on) {
+                body.classList.add('aurora-on');
+                const kpTxt = Number.isFinite(kp) ? (Number.isInteger(kp) ? kp : kp.toFixed(1)) : '--';
+                const z = document.getElementById('aurora-kp'); if (z) z.textContent = kpTxt;
+                const e = document.getElementById('aurora-kp-en'); if (e) e.textContent = kpTxt;
+                startAurora();
+            } else {
+                body.classList.remove('aurora-on');
+                stopAurora();
+            }
+        }
+
+        // --- 极光画布动画：多层正弦光带 + 竖向亮纹，纯 Canvas 生成 ---
+        function startAurora() {
+            const canvas = document.getElementById('aurora-canvas');
+            if (!canvas || auroraRAF) return;
+            const ctx = canvas.getContext('2d');
+
+            function resize() {
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                canvas.width = window.innerWidth * dpr;
+                canvas.height = (window.innerHeight * 0.48) * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+            resize();
+            canvas.__auroraResize = resize;
+            window.addEventListener('resize', resize);
+
+            // 三层光带配色：青绿 → 蓝 → 淡紫（典型极光色谱）；低频=宽缓的波，配合 CSS 模糊更弥散
+            const bands = [
+                { color: '6,214,160',   amp: 34, freq: 0.0055, speed: 0.00016, phase: 0,   top: 0.22, h: 0.66, a: 0.52 },
+                { color: '58,134,255',  amp: 26, freq: 0.0080, speed: 0.00024, phase: 2.1, top: 0.30, h: 0.56, a: 0.24 },
+                { color: '150,110,255', amp: 22, freq: 0.0110, speed: 0.00032, phase: 4.3, top: 0.12, h: 0.55, a: 0.30 },
+            ];
+
+            function draw(ts) {
+                const W = window.innerWidth;
+                const H = window.innerHeight * 0.48;
+                ctx.clearRect(0, 0, W, H);
+                if (document.hidden) { auroraRAF = requestAnimationFrame(draw); return; } // tab 隐藏省电
+
+                ctx.globalCompositeOperation = 'lighter'; // 叠加发光
+
+                // 垂直帘幕光柱（极光的"光帘"主体，缓慢飘移 + 明暗呼吸）
+                for (let i = 0; i < 11; i++) {
+                    const drift = 0.05 * Math.sin(ts * 0.00018 + i * 1.3);
+                    const x = ((i / 11) + drift) * W;
+                    const a = 0.05 + 0.06 * (0.5 + 0.5 * Math.sin(ts * 0.0004 + i * 1.7));
+                    const hue = i % 3 === 0 ? '150,255,210' : (i % 3 === 1 ? '120,200,255' : '170,140,255');
+                    const g = ctx.createLinearGradient(0, 0, 0, H);
+                    g.addColorStop(0,    `rgba(${hue},0)`);
+                    g.addColorStop(0.12, `rgba(${hue},${a})`);
+                    g.addColorStop(1,    `rgba(${hue},0)`);
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x - 22, 0, 44, H * 0.92);
+                }
+
+                // 弥散的波形光带
+                for (const b of bands) {
+                    const baseY = H * b.top;
+                    const bandH = H * b.h;
+                    const grad = ctx.createLinearGradient(0, baseY - b.amp, 0, baseY + bandH);
+                    grad.addColorStop(0,    `rgba(${b.color},0)`);
+                    grad.addColorStop(0.30, `rgba(${b.color},${b.a})`);
+                    grad.addColorStop(1,    `rgba(${b.color},0)`);
+                    ctx.fillStyle = grad;
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, H);
+                    for (let x = 0; x <= W; x += 6) {
+                        // 双正弦叠加做出宽缓飘动的波形顶缘
+                        const y = baseY
+                            + Math.sin(x * b.freq + ts * b.speed + b.phase) * b.amp
+                            + Math.sin(x * b.freq * 0.5 + ts * b.speed * 1.7) * (b.amp * 0.45);
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(W, H);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                ctx.globalCompositeOperation = 'source-over';
+                auroraRAF = requestAnimationFrame(draw);
+            }
+            auroraRAF = requestAnimationFrame(draw);
+        }
+
+        function stopAurora() {
+            if (auroraRAF) { cancelAnimationFrame(auroraRAF); auroraRAF = null; }
+            const canvas = document.getElementById('aurora-canvas');
+            if (canvas) {
+                if (canvas.__auroraResize) window.removeEventListener('resize', canvas.__auroraResize);
+                const ctx = canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // 控制台手动测试：forceAurora(true) 开 / forceAurora(false) 关
+        function forceAurora(on = true, kp = 7) { setAurora(on, kp); }
+
+        // --- 语言切换器 ---
+        function toggleLanguage() {
+            const body = document.body;
+            if (body.classList.contains('zh')) {
+                body.classList.remove('zh');
+                body.classList.add('en');
+            } else {
+                body.classList.remove('en');
+                body.classList.add('zh');
+            }
+            // 刷新当前位置的天气（为了切换风向的语言）
+            refreshCurrentWeather();
+            // 潮汐数据已缓存，只需按新语言重渲染标签即可
+            renderTide();
+        }
+
+        function refreshCurrentWeather() {
+            const select = document.getElementById('spot-select');
+            if (select.value === 'map') {
+                if (mapMarker) {
+                    const latlng = mapMarker.getLatLng();
+                    loadRealWeatherData(latlng.lat, latlng.lng);
+                }
+            } else if (select.value === 'custom') {
+                const lat = document.getElementById('input-lat').value;
+                const lon = document.getElementById('input-lon').value;
+                if(lat && lon) loadRealWeatherData(lat, lon);
+            } else {
+                const coords = select.value.split(',');
+                loadRealWeatherData(coords[0], coords[1]);
+            }
+        }
+
+        // --- 灯箱大图切换逻辑 ---
+        function toggleLightbox(wrapper) {
+            wrapper.classList.toggle('active');
+        }
+
+        // --- 实时单位转换逻辑 ---
+        function convertOzToG(val) {
+            const gInput = document.getElementById('input-g');
+            if(!val) { gInput.value = ''; return; }
+            gInput.value = (parseFloat(val) * 28.34952).toFixed(2);
+        }
+        function convertGToOz(val) {
+            const ozInput = document.getElementById('input-oz');
+            if(!val) { ozInput.value = ''; return; }
+            ozInput.value = (parseFloat(val) / 28.34952).toFixed(3);
+        }
+        function setOz(val) {
+            document.getElementById('input-oz').value = val;
+            convertOzToG(val);
+        }
+
+        function convertKpaToInhg(val) {
+            const inhgInput = document.getElementById('input-inhg');
+            if(!val) { inhgInput.value = ''; return; }
+            inhgInput.value = (parseFloat(val) * 0.2953).toFixed(2);
+        }
+        function convertInhgToKpa(val) {
+            const kpaInput = document.getElementById('input-kpa');
+            if(!val) { kpaInput.value = ''; return; }
+            kpaInput.value = (parseFloat(val) / 0.2953).toFixed(1);
+        }
+        function setKpa(val) {
+            document.getElementById('input-kpa').value = val;
+            convertKpaToInhg(val);
+        }
+
+        // --- 真实气象 API 获取逻辑 ---
+        async function loadRealWeatherData(lat, lon) {
+            loadWaterTemp(lat, lon);   // 独立加载水温，不阻塞天气
+            try {
+                document.getElementById('weather-temp').innerHTML = `...`;
+                document.getElementById('weather-wind').innerHTML = `...`;
+                
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=surface_pressure&past_days=1&forecast_days=1&daily=sunrise,sunset&timezone=America%2FHalifax`;
+
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`网络请求失败，状态码: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                const temp = data.current?.temperature_2m ?? '--';
+                const pressure = data.current?.surface_pressure ? (data.current.surface_pressure / 10).toFixed(1) : '--';
+                const windSpeed = data.current?.wind_speed_10m ?? '--';
+                
+                const windDirDegree = data.current?.wind_direction_10m;
+                const windDirText = windDirDegree !== undefined ? getWindDirection(windDirDegree) : '??';
+                
+                let sunrise = '--', sunset = '--';
+                if (data.daily?.sunrise?.[0] && data.daily?.sunset?.[0]) {
+                    sunrise = data.daily.sunrise[0].split("T")[1];
+                    sunset = data.daily.sunset[0].split("T")[1];
+                }
+
+                document.getElementById('weather-temp').innerHTML = `${temp}<span class="unit">°C</span>`;
+                document.getElementById('weather-press').innerHTML = `${pressure}<span class="unit">kPa</span><span class="trend-icon" id="press-trend"></span>`;
+                document.getElementById('weather-wind').innerHTML = `${windDirText} <br>${windSpeed} <span style="font-size:11px;color:var(--text-muted);">km/h</span>`;
+                document.getElementById('weather-sun').innerHTML = `🌅 ${sunrise}<br>🌇 ${sunset}`;
+
+                // --- 气压趋势：对比 3 小时前 ---
+                renderPressureTrend(data);
+
+            } catch (error) {
+                console.error("数据拉取失败:", error);
+                const isEn = document.body.classList.contains('en');
+                document.getElementById('weather-temp').innerHTML = `<span style="font-size:14px;color:#ff9f1c">${isEn ? 'Error' : '获取失败'}</span>`;
+            }
+        }
+
+        // 气压趋势：用 hourly 气压对比 3 小时前，给出 ⬆️/⬇️/➡️
+        function renderPressureTrend(data) {
+            const iconEl = document.getElementById('press-trend');
+            const noteEl = document.getElementById('press-trend-note');
+            if (!iconEl || !noteEl) return;
+            const isEn = document.body.classList.contains('en');
+
+            const ht = data.hourly?.time, hp = data.hourly?.surface_pressure, nowTime = data.current?.time;
+            if (!ht || !hp || !nowTime) { iconEl.textContent = ''; noteEl.textContent = ''; return; }
+
+            // ISO 字符串可直接按字典序比较（= 时间先后），找"当前小时"下标
+            let idx = -1;
+            for (let i = 0; i < ht.length; i++) { if (ht[i] <= nowTime) idx = i; else break; }
+            if (idx < 3 || hp[idx] == null || hp[idx - 3] == null) {
+                iconEl.textContent = ''; noteEl.textContent = '';
+                return;
+            }
+
+            const dP = hp[idx] - hp[idx - 3];       // 单位 hPa，过去 3 小时变化
+            const dKpa = (dP / 10);                 // 换成 kPa 与主显示一致
+            let arrow, cls, word;
+            if (dP > 0.5)      { arrow = '⬆️'; cls = 'trend-up';   word = isEn ? 'rising'  : '上升'; }
+            else if (dP < -0.5){ arrow = '⬇️'; cls = 'trend-down'; word = isEn ? 'falling' : '下降'; }
+            else               { arrow = '➡️'; cls = '';           word = isEn ? 'steady'  : '平稳'; }
+
+            iconEl.className = 'trend-icon ' + cls;
+            iconEl.textContent = arrow;
+            const sign = dKpa >= 0 ? '+' : '';
+            noteEl.textContent = isEn
+                ? `Past 3h: ${word} (${sign}${dKpa.toFixed(2)} kPa)`
+                : `过去3h：${word}（${sign}${dKpa.toFixed(2)} kPa）`;
+        }
+
+        // ===================== 水温模块 (Open-Meteo Marine API 海表温度) =====================
+        let waterReqToken = 0;   // 防竞态：快速切点时丢弃旧请求
+
+        async function loadWaterTemp(lat, lon) {
+            const myToken = ++waterReqToken;
+            const el = document.getElementById('weather-water');
+            const noteEl = document.getElementById('water-note');
+            if (!el) return;
+            const isEn = document.body.classList.contains('en');
+
+            el.innerHTML = '<span style="font-size:14px;color:var(--text-muted);">…</span>';
+            if (noteEl) noteEl.textContent = '';
+
+            try {
+                const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&hourly=sea_surface_temperature&timezone=America%2FHalifax`;
+                const res = await fetch(url);
+                if (myToken !== waterReqToken) return;   // 已有更新请求
+
+                if (!res.ok) { showNoWaterTemp(isEn); return; } // 多为内陆点：海洋 API 返回 400
+                const data = await res.json();
+                if (myToken !== waterReqToken) return;
+
+                const ht = data.hourly?.time, hv = data.hourly?.sea_surface_temperature;
+                if (!ht || !hv) { showNoWaterTemp(isEn); return; }
+
+                // 按 Halifax 本地时钟定位"当前小时"（sv-SE 输出形如 2026-06-05 14:23:00）
+                const nowHfx = new Date().toLocaleString('sv-SE', { timeZone: 'America/Halifax' })
+                                   .replace(' ', 'T').slice(0, 13);   // "2026-06-05T14"
+                let idx = -1;
+                for (let i = 0; i < ht.length; i++) { if (ht[i].slice(0, 13) <= nowHfx) idx = i; else break; }
+                let sst = idx >= 0 ? hv[idx] : null;
+                // 当前小时为空则向前找最近的非空值
+                if (sst == null) {
+                    for (let i = Math.min(idx, hv.length - 1); i >= 0; i--) { if (hv[i] != null) { sst = hv[i]; break; } }
+                }
+
+                if (sst == null || isNaN(sst)) { showNoWaterTemp(isEn); return; }
+
+                const f = (sst * 9/5 + 32).toFixed(0);
+                el.innerHTML = `${sst.toFixed(1)}<span class="unit">°C</span>`;
+                if (noteEl) noteEl.textContent = isEn ? `🌊 SST · ${f}°F` : `🌊 海表温 · ${f}°F`;
+
+            } catch (err) {
+                if (myToken !== waterReqToken) return;
+                console.log('水温数据暂不可用:', err.message);
+                showNoWaterTemp(isEn);
+            }
+        }
+
+        function showNoWaterTemp(isEn) {
+            const el = document.getElementById('weather-water');
+            const noteEl = document.getElementById('water-note');
+            if (el) el.innerHTML = '<span style="font-size:20px;color:var(--text-muted);">—</span>';
+            if (noteEl) noteEl.textContent = isEn ? 'Inland / no sea data' : '内陆点 · 无海温数据';
+        }
+
+        // ===================== 潮汐速查模块 (CHS / DFO IWLS API) =====================
+        const IWLS_BASE = 'https://api-iwls.dfo-mpo.gc.ca/api/v1';
+        let cachedStations = null;   // 潮汐站列表（缓存，只拉一次）
+        let lastTideData = null;     // 上次成功的潮汐数据，供切换语言时重渲染
+        let tideRequestToken = 0;    // 防止快速切点导致的竞态（旧请求覆盖新请求）
+
+        // 两点间球面距离（km），用于找最近潮汐站
+        function haversineKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const toRad = d => d * Math.PI / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat/2)**2 +
+                      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // 拉取全部潮汐站（只拉一次后缓存在内存里）
+        async function getStations() {
+            if (cachedStations) return cachedStations;
+            const res = await fetch(`${IWLS_BASE}/stations`);
+            if (!res.ok) throw new Error(`stations ${res.status}`);
+            cachedStations = await res.json();
+            return cachedStations;
+        }
+
+        // 主入口：根据经纬度加载最近站的高低潮预报
+        async function loadTideData(lat, lon) {
+            const myToken = ++tideRequestToken;
+            const eventsEl = document.getElementById('tide-events');
+            const stationEl = document.getElementById('tide-station');
+
+            eventsEl.innerHTML = `<span class="tide-loading zh">⏳ 正在拉取高低潮预报…</span>
+                                  <span class="tide-loading en">⏳ Loading high/low tide forecast…</span>`;
+            stationEl.innerHTML = `<span class="zh">定位最近潮汐站中…</span>
+                                   <span class="en">Locating nearest station…</span>`;
+
+            try {
+                const stations = await getStations();
+                if (myToken !== tideRequestToken) return; // 已有更新的请求，丢弃本次
+
+                // 按距离排序，优先有 wlp-hilo（高低潮）序列的站
+                const candidates = stations
+                    .map(s => ({ s, dist: haversineKm(lat, lon, s.latitude, s.longitude) }))
+                    .sort((a, b) => a.dist - b.dist);
+
+                const now = new Date();
+                const from = new Date(now.getTime() - 6 * 3600 * 1000); // 往前 6h，确保抓到"当前所处"那一段
+                const to   = new Date(now.getTime() + 3 * 24 * 3600 * 1000); // 未来 3 天
+                const qs = `time-series-code=wlp-hilo&from=${from.toISOString()}&to=${to.toISOString()}`;
+
+                // 从最近的站开始尝试，最多试 5 个，直到拿到有效高低潮数据
+                let picked = null, events = null;
+                let tried = 0;
+                for (const c of candidates) {
+                    if (c.s.timeSeries && !c.s.timeSeries.some(t => t.code === 'wlp-hilo')) continue;
+                    if (tried >= 5) break;
+                    tried++;
+                    try {
+                        const r = await fetch(`${IWLS_BASE}/stations/${c.s.id}/data?${qs}`);
+                        if (myToken !== tideRequestToken) return;
+                        if (!r.ok) continue;
+                        const data = await r.json();
+                        if (Array.isArray(data) && data.length > 0) {
+                            picked = c; events = data; break;
+                        }
+                    } catch (e) { /* 试下一个站 */ }
+                }
+
+                if (myToken !== tideRequestToken) return;
+                if (!picked || !events) { showTideFallback(lat, lon); return; }
+
+                lastTideData = {
+                    stationName: picked.s.officialName || picked.s.code,
+                    distKm: picked.dist,
+                    events: events.map(e => ({ date: e.eventDate, value: e.value }))
+                };
+                renderTide();
+
+            } catch (err) {
+                console.error('潮汐数据拉取失败:', err);
+                if (myToken !== tideRequestToken) return;
+                showTideFallback(lat, lon);
+            }
+        }
+
+        // 渲染潮汐数据（从 lastTideData 读，切换语言时只重渲染、不重新请求）
+        function renderTide() {
+            if (!lastTideData) return;
+            const isEn = document.body.classList.contains('en');
+            const eventsEl = document.getElementById('tide-events');
+            const stationEl = document.getElementById('tide-station');
+
+            const distTxt = lastTideData.distKm < 1
+                ? `${Math.round(lastTideData.distKm * 1000)} m`
+                : `${lastTideData.distKm.toFixed(1)} km`;
+            stationEl.innerHTML = isEn
+                ? `Nearest station: <strong>${lastTideData.stationName}</strong> (~${distTxt})`
+                : `最近潮汐站：<strong>${lastTideData.stationName}</strong>（约 ${distTxt}）`;
+
+            // 判定每个事件是高潮还是低潮：高低潮严格交替，比较相邻值即可
+            const evs = lastTideData.events;
+            const typed = evs.map((e, i) => {
+                const prev = evs[i-1], next = evs[i+1];
+                let isHigh;
+                // 高低潮严格交替：某点比左右相邻都高即为满潮，反之为干潮
+                if (prev && next) isHigh = e.value >= prev.value && e.value >= next.value;
+                else if (next)    isHigh = e.value >= next.value;
+                else if (prev)    isHigh = e.value >= prev.value;
+                else              isHigh = true;
+                return { ...e, isHigh };
+            });
+
+            // 只显示从现在起未来的事件，取接下来 6 个
+            const now = Date.now();
+            let upcoming = typed.filter(e => new Date(e.date).getTime() >= now);
+            if (upcoming.length === 0) upcoming = typed.slice(-6); // 兜底
+            upcoming = upcoming.slice(0, 6);
+
+            const dayFmt = new Intl.DateTimeFormat(isEn ? 'en-CA' : 'zh-CN',
+                { timeZone: 'America/Halifax', weekday: 'short' });
+            const timeFmt = new Intl.DateTimeFormat('en-CA',
+                { timeZone: 'America/Halifax', hour: '2-digit', minute: '2-digit', hour12: false });
+            const todayLabel = new Intl.DateTimeFormat('en-CA',
+                { timeZone: 'America/Halifax', weekday: 'short' }).format(new Date());
+
+            eventsEl.innerHTML = upcoming.map((e, idx) => {
+                const d = new Date(e.date);
+                const dayTxt = dayFmt.format(d);
+                const isToday = new Intl.DateTimeFormat('en-CA',
+                    { timeZone: 'America/Halifax', weekday: 'short' }).format(d) === todayLabel;
+                const meters = e.value.toFixed(2);
+                const feet = (e.value * 3.28084).toFixed(1);
+                const typeTxt = e.isHigh ? (isEn ? '⬆ HIGH' : '⬆ 满潮') : (isEn ? '⬇ LOW' : '⬇ 干潮');
+                const dayShown = isToday ? (isEn ? 'Today' : '今天') : dayTxt;
+                return `
+                    <div class="tide-chip ${idx === 0 ? 'is-next' : ''}">
+                        <div class="tide-day">${dayShown}${idx === 0 ? (isEn ? ' · NEXT' : ' · 下一次') : ''}</div>
+                        <span class="tide-type ${e.isHigh ? 'high' : 'low'}">${typeTxt}</span>
+                        <div class="tide-time">${timeFmt.format(d)}</div>
+                        <div class="tide-height">${meters} m / ${feet} ft</div>
+                        ${idx === 0 ? '<div class="tide-countdown" id="tide-countdown"></div>' : ''}
+                    </div>`;
+            }).join('');
+
+            drawTideCurve(typed);    // 先画曲线（内部会刷新 _firstShown 滚动基准）
+            updateTideCountdown();   // 再算倒计时（此时基准已是最新，不会误触发重渲染）
+        }
+
+        // 更新"下一次潮汐还有多久"，每 30 秒走一次；若下一次已过则整体重渲染滚动窗口
+        function updateTideCountdown() {
+            if (!lastTideData) return;
+            const el = document.getElementById('tide-countdown');
+            if (!el) return;
+            const isEn = document.body.classList.contains('en');
+            const now = Date.now();
+            const next = lastTideData.events
+                .map(e => new Date(e.date).getTime())
+                .filter(t => t >= now)
+                .sort((a, b) => a - b)[0];
+
+            if (next === undefined) { el.textContent = ''; return; }
+
+            // 如果最近一次已经过去（窗口该往前滚了），整体重渲染
+            const firstShown = lastTideData._firstShown;
+            if (firstShown !== undefined && now >= firstShown) { renderTide(); return; }
+
+            let mins = Math.round((next - now) / 60000);
+            const h = Math.floor(mins / 60), m = mins % 60;
+            const txt = h > 0
+                ? (isEn ? `in ${h}h ${m}m` : `还有 ${h} 小时 ${m} 分`)
+                : (isEn ? `in ${m}m` : `还有 ${m} 分钟`);
+            el.textContent = '⏱ ' + txt;
+        }
+
+        // 用相邻高低潮做余弦插值，画一条平滑潮汐曲线 + "现在"标记
+        function drawTideCurve(typed) {
+            const wrap = document.getElementById('tide-curve');
+            if (!wrap || !typed || typed.length < 2) { if (wrap) wrap.innerHTML = ''; return; }
+            const isEn = document.body.classList.contains('en');
+
+            const now = Date.now();
+            const pts = typed.map(e => ({ t: new Date(e.date).getTime(), v: e.value, isHigh: e.isHigh }));
+            // 记录当前显示窗口里第一个"未来事件"的时间，供倒计时判断是否需要滚动
+            const firstFuture = pts.find(p => p.t >= now);
+            lastTideData._firstShown = firstFuture ? firstFuture.t : undefined;
+
+            // 窗口：取"现在"前一个点到第 5 个点（约两个完整潮汐周期），保证 now 在可视范围内
+            let startIdx = 0;
+            for (let i = 0; i < pts.length; i++) { if (pts[i].t <= now) startIdx = i; }
+            const win = pts.slice(startIdx, startIdx + 6);
+            if (win.length < 2) { wrap.innerHTML = ''; return; }
+
+            const t0 = win[0].t, t1 = win[win.length - 1].t;
+            const vMin = Math.min(...win.map(p => p.v));
+            const vMax = Math.max(...win.map(p => p.v));
+            const vPad = (vMax - vMin) * 0.15 || 0.5;
+
+            const W = 700, H = 110, padL = 8, padR = 8, padT = 14, padB = 22;
+            const xOf = t => padL + (t - t0) / (t1 - t0) * (W - padL - padR);
+            const yOf = v => padT + (1 - (v - (vMin - vPad)) / ((vMax + vPad) - (vMin - vPad))) * (H - padT - padB);
+
+            // 余弦插值：在每对相邻高低潮之间细分 12 段
+            const path = [];
+            for (let i = 0; i < win.length - 1; i++) {
+                const a = win[i], b = win[i + 1];
+                const steps = 12;
+                for (let s = 0; s <= steps; s++) {
+                    const frac = s / steps;
+                    const t = a.t + (b.t - a.t) * frac;
+                    const v = (a.v + b.v) / 2 + (a.v - b.v) / 2 * Math.cos(Math.PI * frac);
+                    path.push(`${xOf(t).toFixed(1)},${yOf(v).toFixed(1)}`);
+                }
+            }
+            const linePath = 'M' + path.join(' L');
+            const areaPath = `${linePath} L${xOf(t1).toFixed(1)},${H - padB} L${xOf(t0).toFixed(1)},${H - padB} Z`;
+
+            // 高低潮点 + 标签
+            const timeFmt = new Intl.DateTimeFormat('en-CA',
+                { timeZone: 'America/Halifax', hour: '2-digit', minute: '2-digit', hour12: false });
+            const dots = win.map(p => {
+                const cx = xOf(p.t), cy = yOf(p.v);
+                const color = p.isHigh ? 'var(--accent-blue)' : 'var(--accent-orange)';
+                return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3" fill="${color}"/>`;
+            }).join('');
+
+            // "现在"竖线 + 当前水位插值点
+            let nowMarker = '';
+            if (now >= t0 && now <= t1) {
+                const nx = xOf(now);
+                // 找 now 所在区间，插值当前水位
+                let curV = win[0].v;
+                for (let i = 0; i < win.length - 1; i++) {
+                    if (now >= win[i].t && now <= win[i + 1].t) {
+                        const frac = (now - win[i].t) / (win[i + 1].t - win[i].t);
+                        curV = (win[i].v + win[i + 1].v) / 2 + (win[i].v - win[i + 1].v) / 2 * Math.cos(Math.PI * frac);
+                        break;
+                    }
+                }
+                const ny = yOf(curV);
+                const rising = (() => {
+                    for (let i = 0; i < win.length - 1; i++)
+                        if (now >= win[i].t && now <= win[i + 1].t) return win[i + 1].v > win[i].v;
+                    return false;
+                })();
+                const stateTxt = rising ? (isEn ? '↑ rising' : '↑ 涨潮中') : (isEn ? '↓ falling' : '↓ 退潮中');
+                nowMarker = `
+                    <line x1="${nx.toFixed(1)}" y1="${padT}" x2="${nx.toFixed(1)}" y2="${H - padB}"
+                          stroke="var(--accent-green)" stroke-width="1.5" stroke-dasharray="3 3"/>
+                    <circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="4.5" fill="var(--accent-green)" stroke="var(--card-bg)" stroke-width="1.5"/>
+                    <text x="${Math.min(nx + 6, W - 60).toFixed(1)}" y="${(padT + 8).toFixed(1)}"
+                          fill="var(--accent-green)" font-size="11" font-weight="bold">${stateTxt}</text>`;
+            }
+
+            // 端点时间标签
+            const labels = `
+                <text x="${padL}" y="${H - 6}" fill="var(--text-muted)" font-size="10">${timeFmt.format(new Date(t0))}</text>
+                <text x="${W - padR}" y="${H - 6}" fill="var(--text-muted)" font-size="10" text-anchor="end">${timeFmt.format(new Date(t1))}</text>`;
+
+            wrap.innerHTML = `
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="tideGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="var(--accent-blue)" stop-opacity="0.30"/>
+                            <stop offset="100%" stop-color="var(--accent-blue)" stop-opacity="0.02"/>
+                        </linearGradient>
+                    </defs>
+                    <path d="${areaPath}" fill="url(#tideGrad)" stroke="none"/>
+                    <path d="${linePath}" fill="none" stroke="var(--accent-blue)" stroke-width="2"/>
+                    ${dots}
+                    ${nowMarker}
+                    ${labels}
+                </svg>`;
+        }
+
+
+        // 拉取失败时的兜底：给官方潮汐页链接
+        function showTideFallback(lat, lon) {
+            lastTideData = null;
+            const curveEl = document.getElementById('tide-curve');
+            if (curveEl) curveEl.innerHTML = '';
+            const stationEl = document.getElementById('tide-station');
+            const eventsEl = document.getElementById('tide-events');
+            stationEl.innerHTML = '';
+            eventsEl.innerHTML = `
+                <div class="tide-fallback">
+                    <span class="zh">⚠️ 暂时无法直接获取潮汐数据（可能是网络或该处附近无潮汐站）。<br>
+                        可前往官方查询：<a href="https://tides.gc.ca/en/stations" target="_blank">CHS 潮汐站地图 ↗</a></span>
+                    <span class="en">⚠️ Couldn't load tide data right now (network issue, or no tidal station nearby).<br>
+                        Check official source: <a href="https://tides.gc.ca/en/stations" target="_blank">CHS Station Map ↗</a></span>
+                </div>`;
+        }
+
+        function changeSpot() {
+            const select = document.getElementById('spot-select');
+            const customDiv = document.getElementById('custom-coords');
+            const mapWrapper = document.getElementById('map-wrapper');
+            const val = select.value;
+
+            if (val === 'custom') {
+                customDiv.style.display = 'flex';
+                mapWrapper.style.display = 'none';
+            } else if (val === 'map') {
+                customDiv.style.display = 'none';
+                mapWrapper.style.display = 'block';
+                
+                if (!myMap) {
+                    // 初始化地图在 Powder Mill Park
+                    myMap = L.map('map-container').setView([44.78, -63.61], 10);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '© OpenStreetMap'
+                    }).addTo(myMap);
+
+                    mapMarker = L.marker([44.78, -63.61]).addTo(myMap);
+
+                    myMap.on('click', function(e) {
+                        const clickedLat = e.latlng.lat;
+                        const clickedLon = e.latlng.lng;
+                        mapMarker.setLatLng(e.latlng);
+                        loadRealWeatherData(clickedLat, clickedLon);
+                        loadTideData(clickedLat, clickedLon);
+                    });
+                }
+                setTimeout(() => { myMap.invalidateSize(); }, 200);
+            } else {
+                customDiv.style.display = 'none';
+                mapWrapper.style.display = 'none';
+                const coords = val.split(',');
+                loadRealWeatherData(coords[0], coords[1]);
+                loadTideData(parseFloat(coords[0]), parseFloat(coords[1]));
+            }
+        }
+
+        function fetchCustomSpot() {
+            const lat = document.getElementById('input-lat').value;
+            const lon = document.getElementById('input-lon').value;
+            if (lat && lon) {
+                loadRealWeatherData(lat, lon);
+                loadTideData(parseFloat(lat), parseFloat(lon));
+            } else {
+                const isEn = document.body.classList.contains('en');
+                alert(isEn ? "Latitude and Longitude cannot be empty!" : "经纬度不能为空哦！");
+            }
+        }
+
+        function getWindDirection(degree) {
+            const isEn = document.body.classList.contains('en');
+            // 中英文风向数组
+            const directionsZh = ['北风(N)', '东北风(NE)', '东风(E)', '东南风(SE)', '南风(S)', '西南风(SW)', '西风(W)', '西北风(NW)'];
+            const directionsEn = ['North(N)', 'North East(NE)', 'East(E)', 'South East(SE)', 'South(S)', 'South West(SW)', 'West(W)', 'North West(NW)'];
+            
+            const index = Math.round(((degree %= 360) < 0 ? degree + 360 : degree) / 45) % 8;
+            return isEn ? directionsEn[index] : directionsZh[index];
+        }
+
+// --- 河豚彩蛋孵化器 ---
+        function spawnFish() {
+            // 如果屏幕上已经有鱼了，就不生了，保持稀有度
+            if (document.querySelector('.floating-fish')) return;
+
+            const fish = document.createElement('div');
+            fish.className = 'floating-fish';
+            
+            // 随机生成一个高度 (屏幕高度的 20% 到 80% 之间)
+            const randomTop = Math.random() * 60 + 20; 
+            fish.style.top = `${randomTop}%`;
+
+            // 鱼的内部结构：一个气泡 + 一张图片
+            // 提示：你可以把你平时画的图（比如搞个翻车鱼版的初华）导成透明 PNG，传到 GitHub 里，直接替换下面这行 src 的链接！
+            // 极光模式下，台词从"呃啊~"换成"你蓝鱼没了"
+            const fishLine = auroraActive ? '你蓝鱼没了' : '呃啊~';
+            fish.innerHTML = `
+                <div class="fish-bubble">${fishLine}</div>
+                <img src="images/A5.png" style="transform: scaleX(-1);">
+            `;
+
+            document.body.appendChild(fish);
+
+            // 强制浏览器渲染初始位置
+            void fish.offsetWidth;
+
+            // 设定慢悠悠飘过屏幕的动画 (用时 15 到 25 秒)
+            const driftDuration = Math.random() * 10000 + 15000;
+            fish.style.transition = `left ${driftDuration}ms linear, transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.6s`;
+            fish.style.left = '110vw'; // 目标位置：屏幕右侧外面
+
+            let isClicked = false;
+
+// 点击事件：触发“呃啊~”并螺旋逃离
+            fish.addEventListener('click', () => {
+                if (isClicked) return;
+                isClicked = true;
+                
+                // 1. 紧急刹车！锁死它当前飘到的位置
+                const currentLeft = window.getComputedStyle(fish).left;
+                fish.style.transition = 'none'; 
+                fish.style.left = currentLeft;
+                
+                // 2. 显示受惊状态和“呃啊~”气泡
+                fish.classList.add('scared');
+
+                // 3. 让它在原地懵逼 0.4 秒，让你看清字
+                setTimeout(() => {
+                    // 4. 重新赋予过渡时间：拉长到 1.2 秒，就不会有瞬间消失的错觉了
+                    // 并且让透明度晚 0.3 秒再开始变淡，保证你能看到它飞的过程
+                    fish.style.transition = 'transform 1.2s cubic-bezier(0.5, 0, 0.2, 1), opacity 0.9s ease-in 0.3s';
+                    
+                    // 往右上方疯狂冲刺，伴随 720 度翻滚和缩小
+                    fish.style.transform = 'translate(100vw, -100vh) rotate(720deg) scale(0.3)';
+                    fish.style.opacity = '0';
+
+                    // 动画播完之后，清理代码
+                    setTimeout(() => { fish.remove(); }, 1200);
+                }, 200); // 这里的 200 就是原地发呆的毫秒数
+            });
+
+            // 如果它命大没被点到，安然飘出屏幕后，自动销毁清理垃圾
+            setTimeout(() => {
+                if (!isClicked && fish.parentNode) fish.remove();
+            }, driftDuration);
+        }
+
+        // 每隔 20 秒抛一次骰子，有 30% 的概率刷出一只鱼
+        setInterval(() => {
+            if (Math.random() < 0.30) spawnFish();
+        }, 20000);
+
+        // 每 30 秒刷新一次潮汐倒计时
+        setInterval(updateTideCountdown, 30000);
+        
+        // 为了方便你马上看到效果，页面刚打开 3 秒后强制刷一只出来
+        setTimeout(spawnFish, 3000);
+
+        // 页面加载时执行
+        window.onload = function() {
+            setOz(0.25); 
+            setKpa(101.3); 
+            
+            // 首次加载，传入下拉菜单第一个默认的纬度和经度 (Powder Mill Park)
+            loadRealWeatherData(44.78, -63.61); 
+            loadTideData(44.78, -63.61);
+
+            // 拉取极光（Kp）状态，并每 30 分钟刷新一次
+            fetchAuroraStatus();
+            setInterval(fetchAuroraStatus, 30 * 60 * 1000);
+        };
+    </script>
+</body>
+</html>

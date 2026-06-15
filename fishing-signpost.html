@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NS 钓鱼指路 · NS Fishing Signpost</title>
+<style>
+  :root{
+    --bg:#FBFCFC; --surface:#FFFFFF; --surface-2:#F2F5F4;
+    --ink:#1B2426; --muted:#5E6B6E; --hint:#8A9699;
+    --line:rgba(27,36,38,.12); --line-2:rgba(27,36,38,.22);
+    --sea:#0F6E56;
+    --keep-bg:#EAF3DE; --keep-fg:#3B6D11;
+    --limit-bg:#FAEEDA; --limit-fg:#854F0B;
+    --rel-bg:#EFEFEC; --rel-fg:#5F5E5A;
+    --zone-bg:#E6F1FB; --zone-fg:#0C447C;
+    --warn-bg:#FAEEDA; --warn-fg:#854F0B;
+    --radius:12px; --radius-sm:8px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#12181A; --surface:#1B2326; --surface-2:#232C2F;
+      --ink:#E6EBEC; --muted:#9BA8AB; --hint:#6E7B7E;
+      --line:rgba(255,255,255,.12); --line-2:rgba(255,255,255,.22);
+      --sea:#5DCAA5;
+      --keep-bg:#1c2a16; --keep-fg:#9DC56B;
+      --limit-bg:#33260f; --limit-fg:#E6B566;
+      --rel-bg:#242523; --rel-fg:#A6A6A0;
+      --zone-bg:#0e2236; --zone-fg:#85B7EB;
+      --warn-bg:#33260f; --warn-fg:#E6B566;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:440px;margin:0 auto;padding:18px 14px 28px}
+  .app{background:var(--surface);border:1px solid var(--line-2);border-radius:16px;overflow:hidden}
+  .head{padding:15px 16px 12px;display:flex;align-items:center;gap:10px}
+  .head .ic{font-size:22px;line-height:1}
+  .head h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.2px}
+  .head .sub{margin:0;font-size:11.5px;color:var(--hint)}
+  .langbtn{margin-left:auto;flex:none;border:1px solid var(--line-2);background:var(--surface-2);
+           color:var(--muted);font-family:inherit;font-size:12px;font-weight:600;
+           padding:5px 11px;border-radius:999px;cursor:pointer}
+  .langbtn:hover{color:var(--ink)}
+  .disc{margin:0 16px 12px;padding:8px 11px;background:var(--warn-bg);color:var(--warn-fg);
+        border-radius:var(--radius-sm);font-size:11.5px;line-height:1.5}
+  .cfg{margin:0 16px 12px;padding:8px 11px;background:var(--zone-bg);color:var(--zone-fg);
+       border-radius:var(--radius-sm);font-size:11.5px;line-height:1.5}
+  .seg{margin:0 16px 14px;display:flex;background:var(--surface-2);border-radius:var(--radius-sm);padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);font-family:inherit;
+              font-size:13px;padding:8px 0;border-radius:6px;cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;
+              border:1px solid var(--line)}
+  .controls{margin:0 16px 12px;display:flex;gap:8px;align-items:center}
+  .controls[hidden]{display:none}
+  select{flex:1;height:38px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+         border-radius:var(--radius-sm);padding:0 10px;font-family:inherit;font-size:13px}
+  .zone{font-size:11px;padding:6px 9px;background:var(--zone-bg);color:var(--zone-fg);
+        border-radius:var(--radius-sm);white-space:nowrap}
+  .clbl{font-size:12px;color:var(--muted);white-space:nowrap}
+  .switch{margin:0 16px 14px;display:flex;align-items:center;justify-content:space-between}
+  .switch label{font-size:13px;color:var(--muted);cursor:pointer}
+  .tog{position:relative;width:40px;height:23px;flex:none;cursor:pointer}
+  .tog input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+  .tog .track{position:absolute;inset:0;background:var(--line-2);border-radius:999px;transition:background .15s;pointer-events:none}
+  .tog .knob{position:absolute;top:2px;left:2px;width:19px;height:19px;background:#fff;border-radius:50%;
+             transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.25);pointer-events:none}
+  .tog input:checked ~ .track{background:var(--sea)}
+  .tog input:checked ~ .knob{transform:translateX(17px)}
+  .tog input:focus-visible ~ .track{outline:2px solid var(--sea);outline-offset:2px}
+  .list{padding:0 16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+        padding:12px 14px;margin-bottom:10px}
+  .crow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .cname{font-size:14.5px;font-weight:600}
+  .badge{font-size:10.5px;padding:2px 8px;border-radius:999px;line-height:1.5}
+  .b-keep{background:var(--keep-bg);color:var(--keep-fg)}
+  .b-limit{background:var(--limit-bg);color:var(--limit-fg)}
+  .b-rel{background:var(--rel-bg);color:var(--rel-fg)}
+  .b-zone{background:var(--zone-bg);color:var(--zone-fg)}
+  .b-warn{background:var(--warn-bg);color:var(--warn-fg)}
+  .csub{font-size:11px;color:var(--hint);margin:0 0 7px}
+  .gist{font-size:12px;color:var(--muted);margin:0 0 10px}
+  .pages{display:flex;gap:8px;margin-bottom:8px}
+  .pg{flex:1;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);
+      padding:8px 10px;text-align:left;cursor:pointer;font-family:inherit}
+  .pg:hover{border-color:var(--line-2)}
+  .pg .lbl{font-size:10px;color:var(--hint)}
+  .pg .val{font-size:13px;font-weight:600;font-family:var(--mono);color:var(--ink)}
+  .go{width:100%;border:1px solid var(--sea);background:transparent;color:var(--sea);
+      font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 12px;border-radius:var(--radius-sm);
+      cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+  .go:hover{background:var(--sea);color:#fff}
+  .go:disabled{border-color:var(--line-2);color:var(--hint);cursor:default;background:transparent}
+  .go .ar{font-size:13px}
+  .hidden-note{margin:2px 16px 12px;font-size:11px;color:var(--hint);line-height:1.5}
+  .legend{margin:0 16px 4px;display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--hint)}
+  .legend i{font-style:normal}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+  .d-keep{background:var(--keep-fg)} .d-limit{background:var(--limit-fg)} .d-rel{background:var(--rel-fg)}
+  .foot{border-top:1px solid var(--line);margin-top:6px;padding:11px 16px;font-size:10.5px;
+        color:var(--hint);line-height:1.5}
+  .foot a{color:var(--sea)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  *:focus-visible{outline:2px solid var(--sea);outline-offset:2px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="app" role="region" aria-label="Nova Scotia fishing signpost">
+    <div class="head">
+      <span class="ic" aria-hidden="true">🐟</span>
+      <div><h1 id="title"></h1><p class="sub" id="sub"></p></div>
+      <button class="langbtn" id="lang"></button>
+    </div>
+    <p class="disc" id="disc"></p>
+    <p class="cfg" id="cfg" hidden></p>
+    <div class="seg" role="tablist">
+      <button id="seg-fresh" role="tab" aria-pressed="false"></button>
+      <button id="seg-marine" role="tab" aria-pressed="true"></button>
+    </div>
+    <div class="controls">
+      <select id="pick"></select>
+    </div>
+    <div class="controls" id="zone-row" hidden>
+      <label for="mzone" class="clbl" id="mzone-lbl"></label>
+      <select id="mzone"></select>
+    </div>
+    <p class="hidden-note" id="gulf-note" hidden></p>
+    <div class="controls" id="county-row" hidden>
+      <label for="county" class="clbl" id="county-lbl"></label>
+      <select id="county"></select>
+    </div>
+    <div class="switch">
+      <label for="keep" id="keep-lbl"></label>
+      <span class="tog">
+        <input type="checkbox" id="keep" checked>
+        <span class="track" aria-hidden="true"></span>
+        <span class="knob" aria-hidden="true"></span>
+      </span>
+    </div>
+    <div class="legend" id="legend" aria-hidden="true"></div>
+    <div class="list" id="list"></div>
+    <p class="hidden-note" id="hidden" hidden></p>
+    <div class="foot" id="foot"></div>
+  </div>
+</div>
+
+<script>
+/* ===== 数据(由 build_index.py 注入,勿手改;改请改 Python 源) ===== */
+const META = {
+  "verified": "2026-06-13",
+  "userCounty": "Halifax",
+  "handbookPdfUrl": "https://www.novascotia.ca/sites/default/files/documents/1-2412/anglers-handbook-en.pdf",
+  "dfoOrders": "https://www.inter.dfo-mpo.gc.ca/Maritimes/Orders-Registry"
+};
+const RFA_MAP = [{"rfa": 1, "counties": ["Cape Breton", "Inverness", "Richmond", "Victoria"], "book": [23, 28], "pdf": [24, 29]}, {"rfa": 2, "counties": ["Antigonish", "Guysborough", "Pictou"], "book": [29, 33], "pdf": [30, 34]}, {"rfa": 3, "counties": ["Halifax", "Lunenburg"], "book": [37, 42], "pdf": [38, 43]}, {"rfa": 4, "counties": ["Digby", "Queens", "Shelburne", "Yarmouth"], "book": [43, 44], "pdf": [44, 45]}, {"rfa": 5, "counties": ["Annapolis", "Hants", "Kings"], "book": [45, 47], "pdf": [46, 48]}, {"rfa": 6, "counties": ["Colchester", "Cumberland"], "book": [48, 51], "pdf": [49, 52]}];
+const UI = {
+  "zh": {
+    "title": "NS 钓鱼指路",
+    "sub": "出门前速查 · 只指路,不转载",
+    "disclaimer": "本工具仅为导航索引,无法律效力。一切以官方原文为准,法规随时可变。",
+    "cfg": "⚙ 待配置:在 build_index.py 的 META.handbookPdfUrl 填官方手册 PDF 网址并重新生成,淡水「跳页」才会生效。",
+    "fresh": "淡水",
+    "marine": "海水",
+    "pickAll": "全部鱼种",
+    "county": "钓点所在县",
+    "keepOnly": "只看我能带回家的",
+    "lKeep": "能留",
+    "lLimit": "限量",
+    "lRel": "不可留",
+    "verify": "易变",
+    "zoneAll": "全区同",
+    "mzoneLbl": "钓点海区",
+    "zoneOptWest": "Halifax 港及以西",
+    "zoneOptEast": "Halifax 港以东→Cape North(含 Bras d'Or)",
+    "zoneOptGulf": "Gulf / Northumberland 侧",
+    "gulfNote": "⚠ Gulf 区属另一个 DFO 区,条纹鲈等其他鱼种规则也可能不同,点各鱼的 DFO 链接确认。",
+    "general": "通用规则",
+    "local": "本地",
+    "handbookPage": "手册 第 {p} 页",
+    "pages": "第 {a}–{b} 页",
+    "openPdf": "打开官方 PDF · 跳第 {p} 页",
+    "viewDfo": "查 DFO 原文",
+    "noManaged": "无受管页面 · 无需查",
+    "hidden": "🚫 已隐藏:{n}(不可留 / 岸钓够不着)",
+    "none": "没有符合条件的鱼种。",
+    "verified": "🕒 核实日期 {d} · DFO 项易变,出门前请回查 ",
+    "orders": "Orders Registry",
+    "toBtn": "EN"
+  },
+  "en": {
+    "title": "NS Fishing Signpost",
+    "sub": "Quick check before you go · pointers, not the rules",
+    "disclaimer": "Navigation index only — no legal force. Always confirm against the official source; rules can change anytime.",
+    "cfg": "⚙ Setup: set META.handbookPdfUrl in build_index.py and regenerate so freshwater page-jumps work.",
+    "fresh": "Freshwater",
+    "marine": "Saltwater",
+    "pickAll": "All species",
+    "county": "County you're fishing",
+    "keepOnly": "Only show what I can keep",
+    "lKeep": "Keep",
+    "lLimit": "Limited",
+    "lRel": "Release",
+    "verify": "Changes often",
+    "zoneAll": "Same province-wide",
+    "mzoneLbl": "Your marine zone",
+    "zoneOptWest": "Halifax Harbour & west",
+    "zoneOptEast": "East of Halifax → Cape North (incl. Bras d'Or)",
+    "zoneOptGulf": "Gulf / Northumberland side",
+    "gulfNote": "⚠ The Gulf is a separate DFO region; some other species (e.g. striped bass) may differ — check each fish's DFO link.",
+    "general": "General rules",
+    "local": "Local",
+    "handbookPage": "Handbook p.{p}",
+    "pages": "pp. {a}–{b}",
+    "openPdf": "Open official PDF · go to p.{p}",
+    "viewDfo": "View DFO source",
+    "noManaged": "Not a managed species",
+    "hidden": "🚫 Hidden: {n} (release-only / not shore-reachable)",
+    "none": "No species match.",
+    "verified": "🕒 Verified {d} · DFO rules change often — recheck the ",
+    "orders": "Orders Registry",
+    "toBtn": "中"
+  }
+};
+const SPECIES = [
+  {
+    "water": "fresh",
+    "status": "keep",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Trout 鳟鱼",
+      "en": "Trout"
+    },
+    "gist": {
+      "zh": "多数内陆 4/1–9/30 · 合计 5 条 · 9月不留 Brook Trout 且禁天然饵 · 分区例外多",
+      "en": "Most inland Apr 1–Sep 30 · 5 fish aggregate · no Brook Trout & no natural bait in Sept · many area exceptions"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "keep",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Smallmouth Bass 小口鲈",
+      "en": "Smallmouth Bass"
+    },
+    "gist": {
+      "zh": "Hwy 以东强制留存;以西按 sportfish · 分区限额见 RFA",
+      "en": "Mandatory retention east of the Hwy line; sportfish to the west · area limits in each RFA"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "keep",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Chain Pickerel 链狗鱼",
+      "en": "Chain Pickerel"
+    },
+    "gist": {
+      "zh": "全省强制留存(入侵种,钓到必须留)",
+      "en": "Mandatory retention province-wide (invasive — must keep)"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "keep",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Perch 鲈(White/Yellow)",
+      "en": "Perch (White/Yellow)"
+    },
+    "gist": {
+      "zh": "White 10 条 / Yellow 25 条 · 开放季随 sportfish · 分区有延长季",
+      "en": "White 10 / Yellow 25 · season follows sportfish · extended seasons in some areas"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "keep",
+    "shore": true,
+    "genBook": 11,
+    "genPdf": 12,
+    "name": {
+      "zh": "Lake Whitefish 湖白鲑",
+      "en": "Lake Whitefish"
+    },
+    "gist": {
+      "zh": "2026 起限 2 条 · 开放季随 sportfish",
+      "en": "Limit 2 from 2026 · season follows sportfish"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "limit",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Landlocked Salmon 陆封鲑",
+      "en": "Landlocked Salmon"
+    },
+    "gist": {
+      "zh": "多数水域全年关闭,少数指定湖开放 · 2 条 · 35–63cm,>63 放生",
+      "en": "Closed in most waters; open in a few listed lakes · 2 fish · 35–63 cm, release over 63"
+    }
+  },
+  {
+    "water": "fresh",
+    "status": "rel",
+    "shore": true,
+    "genBook": 10,
+    "genPdf": 11,
+    "name": {
+      "zh": "Lake (Grey) Trout 湖鳟",
+      "en": "Lake (Grey) Trout"
+    },
+    "gist": {
+      "zh": "只放流(catch & release)",
+      "en": "Catch and release only"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "id": "groundfish",
+    "sub": "Pollock · Flounder · Cod · Haddock",
+    "name": {
+      "zh": "Groundfish 底层鱼",
+      "en": "Groundfish"
+    },
+    "zones": {
+      "west": {
+        "verify": false,
+        "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/groundfish-poisson-fond-eng.html",
+        "label": {
+          "zh": "西区规则",
+          "en": "West-zone rule"
+        },
+        "gist": {
+          "zh": "Halifax 港及以西:2/1–12/31 · 每日合计 10 条 · 鳕仅 6月第三周六–劳动节可留(≤5) · halibut/狼鱼禁留 · 免执照",
+          "en": "Halifax Harbour & west: Feb 1–Dec 31 · 10/day total · cod only 3rd Sat June–Labour Day (≤5) · halibut/wolffish prohibited · no licence"
+        }
+      },
+      "east": {
+        "verify": true,
+        "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/groundfish-poisson-fond-eng.html",
+        "label": {
+          "zh": "东区规则",
+          "en": "East-zone rule"
+        },
+        "gist": {
+          "zh": "Hartlen Point 以东至 Cape North(含 Bras d'Or):仅夏季开放(每年变更令定档,近年约 6月底–9月初) · 每日 5 条 · halibut 禁留 · 免执照",
+          "en": "East of Hartlen Point to Cape North (incl. Bras d'Or): summer only (dates set by annual Variation Order, recently ~late June–early Sept) · 5/day · no halibut · no licence"
+        }
+      },
+      "gulf": {
+        "verify": true,
+        "url": "https://www.glf.dfo-mpo.gc.ca/en/recreational-groundfish-fishery-southern-gulf-st-lawrence-0",
+        "label": {
+          "zh": "Gulf 区规则",
+          "en": "Gulf-zone rule"
+        },
+        "gist": {
+          "zh": "南 Gulf(NB 边界至 Cape North)NS 侧:2026 约 8/1–9/5、日出–日落 · 每日 15 条(含鳕/白鱼 ≤5) · skate/halibut/狼鱼禁留 · 免执照",
+          "en": "Southern Gulf (NB border to Cape North), NS side: 2026 ~Aug 1–Sep 5, sunrise–sunset · 15/day (incl. ≤5 cod/white hake) · skate/halibut/wolffish prohibited · no licence"
+        }
+      }
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "verify": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/pelag-eng.html#mackerel",
+    "zone": "all",
+    "name": {
+      "zh": "Mackerel 鲭鱼",
+      "en": "Mackerel"
+    },
+    "gist": {
+      "zh": "4/1–12/31 全潮汐 · 每日 20 条 · 1 线 ≤3 钩 · 2025 起无最小尺寸 · 免执照",
+      "en": "Apr 1–Dec 31 all tidal · 20/day · 1 line ≤3 hooks · no min size since 2025 · no licence"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "limit",
+    "shore": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html#bass",
+    "zone": "all",
+    "name": {
+      "zh": "Striped Bass 条纹鲈",
+      "en": "Striped Bass"
+    },
+    "gist": {
+      "zh": "潮汐全年 · 每日 1 条 · 须 68–150cm · 仅竿钓 · 窗口窄,多为量了即放",
+      "en": "Tidal year-round · 1/day · must be 68–150 cm · angling only · narrow slot, mostly catch & release"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html#eel",
+    "zone": "all",
+    "name": {
+      "zh": "Eel 鳗鲡",
+      "en": "Eel"
+    },
+    "gist": {
+      "zh": "潮汐竿钓全年 · 每日 10 条 · 最小 35cm · 潮汐免执照",
+      "en": "Tidal angling year-round · 10/day · min 35 cm · no licence (tidal)"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "verify": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html#gaspereau",
+    "zone": "all",
+    "name": {
+      "zh": "Gaspereau 灰西鲱",
+      "en": "Gaspereau"
+    },
+    "gist": {
+      "zh": "潮汐竿钓无封季 · 每日 20 条 · 抄网另有逐县逐周时段限制,细则见原文",
+      "en": "Tidal angling no closed season · 20/day · dip-net has county/weekly time limits — see source"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html#smelt",
+    "zone": "all",
+    "name": {
+      "zh": "Smelt 胡瓜鱼",
+      "en": "Smelt"
+    },
+    "gist": {
+      "zh": "潮汐竿钓 8/1–5/31 · 竿钓/叉 60、抄网 30 · 部分港湾禁抄网/叉",
+      "en": "Tidal angling Aug 1–May 31 · rod/spear 60, dip-net 30 · banned in some harbours"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "verify": true,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html",
+    "zone": "all",
+    "name": {
+      "zh": "American Shad 西鲱",
+      "en": "American Shad"
+    },
+    "gist": {
+      "zh": "洄游种,归 DFO · 潮汐无封季 · 限额细则见原文",
+      "en": "Diadromous, DFO-managed · no closed season in tidal · limits — see source"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "keep",
+    "shore": true,
+    "url": null,
+    "zone": "all",
+    "name": {
+      "zh": "Sculpin / Sea Raven 杂鱼",
+      "en": "Sculpin / Sea Raven"
+    },
+    "gist": {
+      "zh": "不在 DFO 受管休闲清单 → 无专门 bag limit",
+      "en": "Not on DFO's managed recreational list → no specific bag limit"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "rel",
+    "shore": false,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/diadrom-eng.html#salmon",
+    "zone": "all",
+    "name": {
+      "zh": "Atlantic Salmon 大西洋鲑",
+      "en": "Atlantic Salmon"
+    },
+    "gist": {
+      "zh": "NS 鲑区(SFA19–22)关闭 · 仅 CB 的 Middle/Baddeck/North 三河单钩无倒刺蝇 C&R",
+      "en": "NS salmon areas (SFA 19–22) closed · only Middle/Baddeck/North in Cape Breton, single barbless fly C&R"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "rel",
+    "shore": false,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/pelag-eng.html#tuna",
+    "zone": "all",
+    "name": {
+      "zh": "Bluefin Tuna 蓝鳍金枪",
+      "en": "Bluefin Tuna"
+    },
+    "gist": {
+      "zh": "个人无资格领证 · 仅持商业证渔民开包船 C&R · 7/15–12/31",
+      "en": "Individuals not eligible for a licence · charter-only C&R · Jul 15–Dec 31"
+    }
+  },
+  {
+    "water": "marine",
+    "status": "rel",
+    "shore": false,
+    "url": "https://www.dfo-mpo.gc.ca/fisheries-peches/recreational-recreative/maritimes/pelag-eng.html#shark",
+    "zone": "all",
+    "name": {
+      "zh": "Shark 鲨",
+      "en": "Shark"
+    },
+    "gist": {
+      "zh": "需 DFO 执照 · 仅 C&R · 大白鲨须放生 · 4/1–12/31",
+      "en": "Licence required · C&R only · white shark must be released · Apr 1–Dec 31"
+    }
+  }
+];
+
+/* ===== 逻辑 / logic ===== */
+const state = {lang:"zh", water:"marine", pick:"all", keepOnly:true, county:META.userCounty, marineZone:"west"};
+const $ = id => document.getElementById(id);
+const L = () => UI[state.lang];
+const fmt = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (_, k) => (k in v ? v[k] : "{"+k+"}"));
+
+function rfaOf(c){ return RFA_MAP.find(r => r.counties.includes(c)); }
+function canKeep(s){ return (s.status==="keep"||s.status==="limit") && s.shore; }
+function esc(t){ return String(t).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function nm(s){ return s.name[state.lang]; }
+function shortName(s){
+  if(state.lang==="en") return s.name.en;
+  const cjk = s.name.zh.match(/[\u4e00-\u9fa5（）()·]+/g);
+  return cjk ? cjk.join("") : s.name.zh;
+}
+
+function openPdf(p){
+  if(!META.handbookPdfUrl){ $("cfg").hidden=false; $("cfg").scrollIntoView({behavior:"smooth",block:"center"}); return; }
+  window.open(META.handbookPdfUrl + "#page=" + p, "_blank", "noopener");
+}
+function openUrl(u){ if(u) window.open(u, "_blank", "noopener"); }
+
+function badge(status){
+  const map = {keep:["b-keep",L().lKeep], limit:["b-limit",L().lLimit], rel:["b-rel",L().lRel]};
+  const [c,t]=map[status]; return `<span class="badge ${c}">${t}</span>`;
+}
+
+function cardFresh(s){
+  const r = rfaOf(state.county);
+  const rfaLabel = r ? `${state.county} · RFA ${r.rfa}` : state.county;
+  const rfaPages = r ? fmt(L().pages,{a:r.book[0],b:r.book[1]}) : "—";
+  const rfaPdf = r ? r.pdf[0] : s.genPdf;
+  return `<div class="card">
+    <div class="crow"><span class="cname">${esc(nm(s))}</span>${badge(s.status)}
+      <span class="badge b-zone">📍 ${esc(rfaLabel)}</span></div>
+    <p class="gist">${esc(s.gist[state.lang])}</p>
+    <div class="pages">
+      <button class="pg" onclick="openPdf(${s.genPdf})">
+        <span class="lbl">${L().general}</span><br><span class="val">${fmt(L().handbookPage,{p:s.genBook})}</span></button>
+      <button class="pg" onclick="openPdf(${rfaPdf})">
+        <span class="lbl">${L().local} ${esc(rfaLabel)}</span><br><span class="val">${rfaPages}</span></button>
+    </div>
+    <button class="go" onclick="openPdf(${s.genPdf})">${fmt(L().openPdf,{p:s.genBook})} <span class="ar">↗</span></button>
+  </div>`;
+}
+
+function cardMarine(s){
+  // groundfish 带 zones,按 state.marineZone 取分区规则;其余鱼种全省统一
+  let gist, url, zoneTxt, isVerify;
+  if(s.zones){
+    const z = s.zones[state.marineZone];
+    gist = z.gist[state.lang]; url = z.url; zoneTxt = z.label[state.lang]; isVerify = !!z.verify;
+  } else {
+    gist = s.gist[state.lang]; url = s.url; zoneTxt = L().zoneAll; isVerify = !!s.verify;
+  }
+  const verify = isVerify ? `<span class="badge b-warn">⚠ ${L().verify}</span>` : "";
+  const zone = `<span class="badge b-zone">📍 ${esc(zoneTxt)}</span>`;
+  const sub = s.sub ? `<p class="csub">${esc(s.sub)}</p>` : "";
+  const btn = url
+    ? `<button class="go" onclick="openUrl('${url}')">${L().viewDfo} <span class="ar">↗</span></button>`
+    : `<button class="go" disabled>${L().noManaged}</button>`;
+  return `<div class="card">
+    <div class="crow"><span class="cname">${esc(nm(s))}</span>${badge(s.status)}${verify}${zone}</div>
+    ${sub}<p class="gist">${esc(gist)}</p>${btn}
+  </div>`;
+}
+
+function render(){
+  const pool = SPECIES.filter(s => s.water === state.water);
+  let shown = state.pick==="all" ? pool.slice() : pool.filter(s => nm(s) === state.pick);
+  let hiddenNames = [];
+  if(state.keepOnly){
+    hiddenNames = shown.filter(s => !canKeep(s)).map(shortName);
+    shown = shown.filter(canKeep);
+  }
+  $("list").innerHTML = shown.length
+    ? shown.map(s => s.water==="fresh" ? cardFresh(s) : cardMarine(s)).join("")
+    : `<p class="gist" style="text-align:center;padding:10px 0">${L().none}</p>`;
+  if(hiddenNames.length){ $("hidden").hidden=false; $("hidden").textContent=fmt(L().hidden,{n:hiddenNames.join(" / ")}); }
+  else $("hidden").hidden = true;
+  $("gulf-note").hidden = !(state.water==="marine" && state.marineZone==="gulf");
+
+  const cur = state.pick;
+  $("pick").innerHTML = `<option value="all">${L().pickAll}</option>` +
+    pool.map(s => `<option value="${esc(nm(s))}">${esc(nm(s))}</option>`).join("");
+  $("pick").value = pool.some(s=>nm(s)===cur) ? cur : "all";
+  if($("pick").value !== cur) state.pick = $("pick").value;
+}
+
+function applyStatic(){
+  const t = L();
+  document.documentElement.lang = state.lang;
+  $("title").textContent = t.title;
+  $("sub").textContent = t.sub;
+  $("disc").textContent = t.disclaimer;
+  $("seg-fresh").textContent = t.fresh;
+  $("seg-marine").textContent = t.marine;
+  $("county-lbl").textContent = t.county;
+  $("keep-lbl").textContent = t.keepOnly;
+  $("mzone-lbl").textContent = t.mzoneLbl;
+  $("gulf-note").textContent = t.gulfNote;
+  const mz = state.marineZone;
+  $("mzone").innerHTML = ["west","east","gulf"].map(k =>
+    `<option value="${k}" ${k===mz?"selected":""}>${esc(t["zoneOpt"+k.charAt(0).toUpperCase()+k.slice(1)])}</option>`).join("");
+  $("lang").textContent = t.toBtn;
+  $("pick").setAttribute("aria-label", t.pickAll);
+  $("county").setAttribute("aria-label", t.county);
+  $("mzone").setAttribute("aria-label", t.mzoneLbl);
+  $("keep").setAttribute("aria-label", t.keepOnly);
+  $("legend").innerHTML =
+    `<i><span class="dot d-keep"></span>${t.lKeep}</i>`+
+    `<i><span class="dot d-limit"></span>${t.lLimit}</i>`+
+    `<i><span class="dot d-rel"></span>${t.lRel}</i>`;
+  $("foot").innerHTML = fmt(t.verified,{d:META.verified}) +
+    `<a href="${META.dfoOrders}" target="_blank" rel="noopener">${t.orders}</a>`;
+  if(!META.handbookPdfUrl){ $("cfg").hidden=false; $("cfg").textContent=t.cfg; }
+}
+
+function sync(){
+  $("seg-fresh").setAttribute("aria-pressed", state.water==="fresh");
+  $("seg-marine").setAttribute("aria-pressed", state.water==="marine");
+  const fresh = state.water==="fresh";
+  $("county-row").hidden = !fresh;   // 县下拉:仅淡水
+  $("zone-row").hidden = fresh;      // 海区下拉:仅海水
+  render();
+}
+
+function init(){
+  $("county").innerHTML = RFA_MAP.map(r =>
+    `<optgroup label="RFA ${r.rfa}">` +
+    r.counties.map(c => `<option ${c===state.county?"selected":""}>${esc(c)}</option>`).join("") +
+    `</optgroup>`).join("");
+  $("seg-fresh").onclick  = () => { state.water="fresh";  state.pick="all"; sync(); };
+  $("seg-marine").onclick = () => { state.water="marine"; state.pick="all"; sync(); };
+  $("pick").onchange   = e => { state.pick = e.target.value; render(); };
+  $("county").onchange = e => { state.county = e.target.value; render(); };
+  $("mzone").onchange  = e => { state.marineZone = e.target.value; render(); };
+  $("keep").onchange   = e => { state.keepOnly = e.target.checked; render(); };
+  $("lang").onclick    = () => { state.lang = state.lang==="zh" ? "en" : "zh"; state.pick="all"; applyStatic(); render(); };
+  applyStatic();
+  sync();
+}
+init();
+</script>
+</body>
+</html>
